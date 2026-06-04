@@ -1,0 +1,74 @@
+name: Data Quality
+
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+jobs:
+  check-ingestion:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check latest ingestion run
+        env:
+          API_BASE_URL: ${{ vars.DEPLOYED_API_URL }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -z "$API_BASE_URL" ]; then
+            echo "DEPLOYED_API_URL repository variable is not set; skipping check."
+            exit 0
+          fi
+
+          response=$(curl -sS "${API_BASE_URL}/api/v1/ingestion-runs?limit=1")
+          echo "$response" > /tmp/ingestion_runs.json
+
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+          from datetime import datetime, timedelta, timezone
+          from pathlib import Path
+
+          data = json.loads(Path("/tmp/ingestion_runs.json").read_text())
+          unhealthy = False
+          reason = []
+
+          if not data:
+              unhealthy = True
+              reason.append("no ingestion runs found")
+          else:
+              latest = data[0]
+              if latest.get("status") == "failed":
+                  unhealthy = True
+                  reason.append("latest run failed")
+              started_raw = latest.get("started_at")
+              if started_raw:
+                  started = datetime.fromisoformat(started_raw.replace("Z", "+00:00"))
+                  if datetime.now(timezone.utc) - started > timedelta(hours=26):
+                      unhealthy = True
+                      reason.append("latest run older than 26 hours")
+
+          if unhealthy:
+              title = "Data quality alert: ECB ingestion unhealthy"
+              body = "Ingestion health check failed: " + ", ".join(reason)
+              body += "\n\n```json\n" + json.dumps(data, indent=2) + "\n```"
+              subprocess.run(
+                  [
+                      "gh",
+                      "issue",
+                      "create",
+                      "--repo",
+                      os.environ["GITHUB_REPOSITORY"],
+                      "--title",
+                      title,
+                      "--body",
+                      body,
+                  ],
+                  check=False,
+              )
+              sys.exit(1)
+
+          print("Ingestion health check passed")
+          PY
