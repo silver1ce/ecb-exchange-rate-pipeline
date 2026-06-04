@@ -44,8 +44,6 @@ curl -X POST http://localhost:8000/api/v1/ingest \
   -d '{"start_period":"2026-01-01","end_period":"2026-01-31"}'
 ```
 
-Presentation walkthrough: [docs/presentation_guide.md](docs/presentation_guide.md)
-
 ## Quick Start (Docker)
 
 ```bash
