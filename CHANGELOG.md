@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-06-04
+
+### Added
+
+- Local development without Docker (SQLite + `scripts/run_local.sh`, `scripts/init_db.py`)
+- `docs/presentation_guide.md` and `docs/credentials.md`
+
+### Fixed
+
+- `DEFAULT_CURRENCIES` empty `.env` value no longer breaks startup
+- `init_db.py` registers all ORM models before `create_all`
+
+### Changed
+
+- `.env.example` defaults to SQLite for local use; PostgreSQL remains documented for Docker
+
 ## [0.1.0] - 2026-06-04
 
 ### Added

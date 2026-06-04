@@ -16,6 +16,36 @@ flowchart LR
 
 See [docs/architecture.md](docs/architecture.md) for component details and error-handling strategy.
 
+## Quick Start (Local — no Docker)
+
+Best option when Docker Desktop is not available. Uses **SQLite** (file: `data/ecb_rates.db`).
+
+```bash
+cd ecb-exchange-rate-pipeline
+cp .env.example .env
+./scripts/run_local.sh
+```
+
+Or step by step:
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+export PYTHONPATH=.
+python scripts/init_db.py
+uvicorn app.main:app --reload --port 8000
+```
+
+Then ingest and query:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/ingest \
+  -H "Content-Type: application/json" \
+  -d '{"start_period":"2026-01-01","end_period":"2026-01-31"}'
+```
+
+Presentation walkthrough: [docs/presentation_guide.md](docs/presentation_guide.md)
+
 ## Quick Start (Docker)
 
 ```bash
@@ -42,7 +72,7 @@ curl -X POST http://localhost:8000/api/v1/ingest \
 
 | Variable | Description | Default |
 |---|---|---|
-| `DATABASE_URL` | Async SQLAlchemy URL (`postgresql+asyncpg://...`) | required |
+| `DATABASE_URL` | Async SQLAlchemy URL (SQLite or `postgresql+asyncpg://...`) | see `.env.example` |
 | `ECB_BASE_URL` | ECB EXR dataset base URL | ECB production URL |
 | `ECB_REQUEST_TIMEOUT` | HTTP timeout in seconds | `30` |
 | `ECB_RETRY_ATTEMPTS` | Retry count for 429/5xx | `3` |
@@ -127,7 +157,7 @@ alembic/      Database migrations
 tests/        Unit and integration tests
 docker/       Dockerfile and docker-compose
 docs/         Architecture, schema, API, runbook
-scripts/      Manual pipeline and backfill utilities
+scripts/      Manual pipeline, backfill, init_db, run_local.sh
 ```
 
 ## Contributing

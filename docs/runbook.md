@@ -1,5 +1,13 @@
 # Runbook
 
+## Local run without Docker
+
+```bash
+./scripts/run_local.sh
+```
+
+Uses SQLite (`data/ecb_rates.db`). Initialize tables only: `python scripts/init_db.py`.
+
 ## Trigger a Backfill
 
 For large historical ranges, use chunked backfill:
