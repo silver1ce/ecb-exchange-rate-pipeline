@@ -178,22 +178,6 @@ Imagine a **paper archive**:
 
 ---
 
-## What leaders can say in a meeting
-
-1. **“We don’t store the same labels thousands of times.”**  
-   Currency and frequency are reference lists.
-
-2. **“The rate is separated from the description.”**  
-   Observations are pure facts: date + number.
-
-3. **“Re-importing the same day won’t duplicate data.”**  
-   The pipeline updates existing rows (idempotent upsert).
-
-4. **“We keep an audit trail.”**  
-   Every pipeline run is logged in `ingestion_run` (rows fetched, inserted, errors).
-
----
-
 ## Optional: audit table after a successful run
 
 | id | status | rows_fetched | rows_inserted | period_start | period_end |
