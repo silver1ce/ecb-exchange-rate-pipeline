@@ -1,4 +1,4 @@
-name: Data Quality
+name: Data Quality Pipeline
 
 on:
   schedule:
@@ -7,68 +7,116 @@ on:
 
 jobs:
   check-ingestion:
+    name: "Ingestion health check"
     runs-on: ubuntu-latest
-
     steps:
       - name: Check latest ingestion run
+        id: check
         env:
           API_BASE_URL: ${{ vars.DEPLOYED_API_URL }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -z "$API_BASE_URL" ]; then
-            echo "DEPLOYED_API_URL repository variable is not set; skipping check."
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            echo "status=skipped" >> "$GITHUB_OUTPUT"
+            echo "message=DEPLOYED_API_URL not configured — set repo variable to enable live checks."
             exit 0
           fi
 
           response=$(curl -sS "${API_BASE_URL}/api/v1/ingestion-runs?limit=1")
           echo "$response" > /tmp/ingestion_runs.json
 
-          python - <<'PY'
+          result=$(python - <<'PY'
           import json
-          import os
-          import subprocess
           import sys
           from datetime import datetime, timedelta, timezone
           from pathlib import Path
 
           data = json.loads(Path("/tmp/ingestion_runs.json").read_text())
-          unhealthy = False
-          reason = []
-
           if not data:
-              unhealthy = True
-              reason.append("no ingestion runs found")
-          else:
-              latest = data[0]
-              if latest.get("status") == "failed":
-                  unhealthy = True
-                  reason.append("latest run failed")
-              started_raw = latest.get("started_at")
-              if started_raw:
-                  started = datetime.fromisoformat(started_raw.replace("Z", "+00:00"))
-                  if datetime.now(timezone.utc) - started > timedelta(hours=26):
-                      unhealthy = True
-                      reason.append("latest run older than 26 hours")
-
-          if unhealthy:
-              title = "Data quality alert: ECB ingestion unhealthy"
-              body = "Ingestion health check failed: " + ", ".join(reason)
-              body += "\n\n```json\n" + json.dumps(data, indent=2) + "\n```"
-              subprocess.run(
-                  [
-                      "gh",
-                      "issue",
-                      "create",
-                      "--repo",
-                      os.environ["GITHUB_REPOSITORY"],
-                      "--title",
-                      title,
-                      "--body",
-                      body,
-                  ],
-                  check=False,
-              )
-              sys.exit(1)
-
-          print("Ingestion health check passed")
+              print("failed|no ingestion runs found")
+              sys.exit(0)
+          latest = data[0]
+          if latest.get("status") == "failed":
+              print(f"failed|latest run failed (id={latest.get('id')})")
+              sys.exit(0)
+          started_raw = latest.get("started_at")
+          if started_raw:
+              started = datetime.fromisoformat(started_raw.replace("Z", "+00:00"))
+              if datetime.now(timezone.utc) - started > timedelta(hours=26):
+                  print("failed|latest run older than 26 hours")
+                  sys.exit(0)
+          print(f"success|run id={latest.get('id')} status={latest.get('status')} rows={latest.get('rows_fetched')}")
           PY
+          )
+
+          status="${result%%|*}"
+          message="${result#*|}"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "message=$message" >> "$GITHUB_OUTPUT"
+
+      - name: Pipeline summary
+        if: always()
+        env:
+          STATUS: ${{ steps.check.outputs.status }}
+          MESSAGE: ${{ steps.check.outputs.message }}
+          SKIPPED: ${{ steps.check.outputs.skipped }}
+        run: |
+          if [ "$SKIPPED" = "true" ]; then
+            cat >> "$GITHUB_STEP_SUMMARY" << SUMMARY
+          ## ⏭️ Data quality pipeline — skipped
+
+          ${MESSAGE}
+
+          Configure **Settings → Secrets and variables → Actions → Variables → \`DEPLOYED_API_URL\`**
+          to point at your deployed API (e.g. \`https://your-api.example.com\`).
+          SUMMARY
+            exit 0
+          fi
+
+          if [ "$STATUS" = "success" ]; then
+            cat >> "$GITHUB_STEP_SUMMARY" << SUMMARY
+          ## ✅ Data quality pipeline — healthy
+
+          **Ingestion status:** SUCCESS
+
+          \`\`\`
+          Scheduled check ──✅──> API /ingestion-runs ──✅──> Latest run OK
+          \`\`\`
+
+          | Check | Result |
+          |-------|--------|
+          | Latest run exists | ✅ |
+          | Status not failed | ✅ |
+          | Freshness (< 26 h) | ✅ |
+
+          ${MESSAGE}
+          SUMMARY
+          else
+            cat >> "$GITHUB_STEP_SUMMARY" << SUMMARY
+          ## ❌ Data quality pipeline — unhealthy
+
+          **Ingestion status:** FAILED
+
+          \`\`\`
+          Scheduled check ──❌──> API /ingestion-runs ──❌──> Action required
+          \`\`\`
+
+          | Check | Result |
+          |-------|--------|
+          | Pipeline health | ❌ ${MESSAGE} |
+
+          See \`docs/runbook.md\` for recovery steps.
+          SUMMARY
+            exit 1
+          fi
+
+      - name: Open GitHub issue on failure
+        if: failure() && steps.check.outputs.skipped != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "Data quality alert: ECB ingestion unhealthy" \
+            --body "Automated check failed: ${{ steps.check.outputs.message }}" \
+            || true

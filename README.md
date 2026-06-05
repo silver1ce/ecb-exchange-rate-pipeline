@@ -1,5 +1,8 @@
 # ECB Exchange Rate Pipeline
 
+[![CI Pipeline](https://github.com/silver1ce/ecb-exchange-rate-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/silver1ce/ecb-exchange-rate-pipeline/actions/workflows/ci.yml)
+[![Data Quality](https://github.com/silver1ce/ecb-exchange-rate-pipeline/actions/workflows/data_quality.yml/badge.svg)](https://github.com/silver1ce/ecb-exchange-rate-pipeline/actions/workflows/data_quality.yml)
+
 Production-grade data engineering pipeline that ingests euro foreign exchange reference rates from the [European Central Bank (ECB) Open Data API](https://data-api.ecb.europa.eu/), stores them in a normalized PostgreSQL database, and exposes the data through a FastAPI REST API.
 
 ## Architecture
@@ -15,6 +18,8 @@ flowchart LR
 ```
 
 See [docs/architecture.md](docs/architecture.md) for component details and error-handling strategy.
+
+**CI visual pipeline:** Every push to `main` runs a 4-stage GitHub Actions workflow (lint → unit ETL → integration/load → summary report). Open the [Actions tab](https://github.com/silver1ce/ecb-exchange-rate-pipeline/actions/workflows/ci.yml) to see the job graph and step summary with pass/fail per stage.
 
 ## Quick Start (Local — no Docker)
 

@@ -1,14 +1,63 @@
-name: CI
+name: CI Pipeline
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  # ── Stage 1: parallel quality gates ──────────────────────────────────
+  lint:
+    name: "1 · Code quality (ruff)"
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
 
+  typecheck:
+    name: "1 · Code quality (mypy)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: mypy app/ pipeline/
+
+  # ── Stage 2: ETL unit tests (Extract + Transform) ────────────────────
+  etl-unit:
+    name: "2 · Extract & Transform"
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - name: Extract — ECB client tests
+        run: pytest tests/unit/test_ecb_client.py -v --tb=short
+      - name: Transform — validation tests
+        run: pytest tests/unit/test_transform.py -v --tb=short
+
+  # ── Stage 3: Load + full pipeline (integration, PostgreSQL) ────────
+  etl-integration:
+    name: "3 · Load & Ingest (PostgreSQL)"
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck]
     services:
       postgres:
         image: postgres:16-alpine
@@ -23,37 +72,87 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-
     env:
       DATABASE_URL: postgresql+asyncpg://ecb_user:ecb_password@localhost:5432/ecb_rates
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-
-      - name: Install dependencies
-        run: pip install -e ".[dev]"
-
-      - name: Lint with ruff
-        run: ruff check .
-
-      - name: Type check with mypy
-        run: mypy app/ pipeline/
-
-      - name: Run database migrations
+      - run: pip install -e ".[dev]"
+      - name: Database — run Alembic migrations
         run: alembic upgrade head
-
-      - name: Run tests with coverage
-        run: pytest tests/ -v --cov=app --cov=pipeline --cov-report=xml
-
-      - name: Upload coverage to Codecov
+      - name: Load + API — integration tests
+        run: pytest tests/integration/ -v --tb=short
+      - name: Coverage report
+        run: pytest tests/ -q --cov=app --cov=pipeline --cov-report=xml
+      - name: Upload coverage
         uses: codecov/codecov-action@v4
         with:
           files: coverage.xml
           fail_ci_if_error: false
+
+  # ── Stage 4: visual pipeline summary (always runs) ─────────────────
+  pipeline-success:
+    name: "4 · Pipeline report"
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck, etl-unit, etl-integration]
+    if: always()
+    steps:
+      - name: Write pipeline summary
+        env:
+          LINT: ${{ needs.lint.result }}
+          TYPECHECK: ${{ needs.typecheck.result }}
+          UNIT: ${{ needs.etl-unit.result }}
+          INTEGRATION: ${{ needs.etl-integration.result }}
+        run: |
+          icon() {
+            case "$1" in
+              success) echo "✅" ;;
+              failure) echo "❌" ;;
+              cancelled) echo "⚪" ;;
+              skipped) echo "⏭️" ;;
+              *) echo "❓" ;;
+            esac
+          }
+
+          OVERALL="success"
+          for r in "$LINT" "$TYPECHECK" "$UNIT" "$INTEGRATION"; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              OVERALL="failure"
+            fi
+          done
+
+          if [ "$OVERALL" = "success" ]; then
+            HEADER="## ✅ ETL Pipeline — All stages passed"
+            BANNER="**Status: SUCCESS** — Extract → Transform → Load → API verified in CI"
+          else
+            HEADER="## ❌ ETL Pipeline — One or more stages failed"
+            BANNER="**Status: FAILED** — see job logs above for details"
+          fi
+
+          cat >> "$GITHUB_STEP_SUMMARY" << SUMMARY
+          ${HEADER}
+
+          ${BANNER}
+
+          \`\`\`
+          ECB API ──$(icon "$UNIT")──> Extract ──$(icon "$UNIT")──> Transform ──$(icon "$UNIT")──> Load ──$(icon "$INTEGRATION")──> PostgreSQL ──$(icon "$INTEGRATION")──> REST API
+          \`\`\`
+
+          | Stage | CI job | Result |
+          |-------|--------|--------|
+          | Code quality (lint) | \`lint\` | $(icon "$LINT") ${LINT} |
+          | Code quality (types) | \`typecheck\` | $(icon "$TYPECHECK") ${TYPECHECK} |
+          | Extract (ECB client) | \`etl-unit\` | $(icon "$UNIT") ${UNIT} |
+          | Transform (validation) | \`etl-unit\` | $(icon "$UNIT") ${UNIT} |
+          | Load + Ingest + API | \`etl-integration\` | $(icon "$INTEGRATION") ${INTEGRATION} |
+
+          **Trigger:** \`${{ github.event_name }}\` on \`${{ github.ref_name }}\`
+          **Commit:** \`${{ github.sha }}\`
+          SUMMARY
+
+          if [ "$OVERALL" != "success" ]; then
+            exit 1
+          fi
