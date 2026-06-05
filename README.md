@@ -146,6 +146,8 @@ Normalized 3NF schema with lookup tables (`frequency`, `currency`), series metad
 
 Details: [docs/database_schema.md](docs/database_schema.md)
 
+**Before/after example for stakeholders:** [docs/data_transformation_example.md](docs/data_transformation_example.md) — raw ECB CSV vs normalised tables with side-by-side samples.
+
 ## Project Structure
 
 ```

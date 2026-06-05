@@ -55,6 +55,10 @@ flowchart TD
 
 The `migrate` service applies Alembic migrations before the API starts.
 
+## Data transformation example
+
+For a non-technical before/after view (raw CSV → cleaned records → normalised tables), see [data_transformation_example.md](data_transformation_example.md).
+
 ## Observability
 
 - Structured logs for ECB requests (URL, status, latency, row count).
